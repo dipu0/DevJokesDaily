@@ -1,5 +1,8 @@
 name: Programming Joke Collector
 on:
+  push:
+    branches:
+      - main
   schedule:
     - cron: '0 8-20 * * 0-4' # Sun-Thu, 8AM-8PM UTC
   workflow_dispatch:
@@ -10,7 +13,7 @@ permissions:
   id-token: write
 
 jobs:
-  collect-joke:
+  setup-and-collect-joke:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
@@ -24,40 +27,74 @@ jobs:
           git config --global user.email "c.dipu0@gmail.com"
           git config --global pull.rebase true
 
-      - name: Setup Pages Directory
+      - name: Create GitHub Pages Project Structure
         run: |
-          mkdir -p docs
-          
-          # Create _config.yml if not exists
-          if [[ ! -f docs/_config.yml ]]; then
-            cat > docs/_config.yml << EOF
+          # Ensure docs directory exists
+          mkdir -p docs/jokes
+          mkdir -p docs/assets/css
+
+          # Create _config.yml
+          cat > docs/_config.yml << EOF
 title: DevJokesDaily
+description: A daily collection of programming jokes
 theme: jekyll-theme-primer
 plugins:
   - jekyll-relative-links
+  - jekyll-seo-tag
 EOF
-          fi
-          
-          # Create index.md if not exists
-          if [[ ! -f docs/index.md ]]; then
-            cat > docs/index.md << EOF
+
+          # Create main index.md
+          cat > docs/index.md << EOF
 ---
 layout: default
 title: DevJokesDaily
 ---
 # Programming Joke Archive
 
-Browse monthly collections:
+Welcome to the daily dose of developer humor! 
+
+## Monthly Joke Collections
 EOF
-          fi
-          
-          # Create README.md if not exists
-          if [[ ! -f docs/README.md ]]; then
-            echo "# Jokes Index" > docs/README.md
-          fi
-          
-          # Ensure jokes directory exists
-          mkdir -p docs/jokes
+
+          # Create README.md
+          cat > docs/README.md << EOF
+# DevJokesDaily
+
+A collection of programming jokes, updated daily.
+
+## Joke Collections
+EOF
+
+          # Create assets/css/style.scss
+          cat > docs/assets/css/style.scss << EOF
+---
+---
+
+@import "{{ site.theme }}";
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.joke {
+  background-color: #f4f4f4;
+  border-left: 4px solid #007bff;
+  padding: 10px;
+  margin: 10px 0;
+}
+EOF
+
+          # Create .gitignore to prevent Jekyll build artifacts from being tracked
+          cat > .gitignore << EOF
+docs/_site/
+docs/.sass-cache/
+docs/.jekyll-cache/
+docs/.jekyll-metadata
+EOF
 
       - name: Determine Run Conditions
         id: schedule
@@ -70,16 +107,14 @@ EOF
           echo "should_run=$SHOULD_RUN" >> $GITHUB_OUTPUT
           echo "date=$(date +'%Y-%m-%d %H:%M')" >> $GITHUB_OUTPUT
 
-      - name: Collect Joke
+      - name: Collect Initial Joke
         if: steps.schedule.outputs.should_run == 'true'
         run: |
           MONTH=$(date +'%Y-%m')
           JOKE_FILE="docs/jokes/$MONTH.md"
           
-          # Initialize monthly file if needed
-          if [[ ! -f "$JOKE_FILE" ]]; then
-            printf "# %s Jokes\n\n" "$MONTH" > "$JOKE_FILE"
-          fi
+          # Initialize monthly file
+          printf "# %s Jokes\n\n" "$MONTH" > "$JOKE_FILE"
           
           # Fetch joke
           JOKE_JSON=$(curl -s "https://v2.jokeapi.dev/joke/Programming?blacklistFlags=nsfw,racist&type=single,twopart")
@@ -96,18 +131,17 @@ EOF
           echo -e "\n### $(steps.schedule.outputs.date) (ID: $(jq -r '.id' <<< "$JOKE_JSON"))\n$CONTENT" >> "$JOKE_FILE"
           
           # Update indexes
-          grep -qF "$MONTH" docs/index.md || echo "- [$MONTH](jokes/$MONTH.md)" >> docs/index.md
-          grep -qF "$MONTH" docs/README.md || echo "- [$MONTH](jokes/$MONTH.md)" >> docs/README.md
-          
-          # Commit
-          git add docs/
-          git commit -m "${MSG:0:72}"
+          echo "- [$MONTH](jokes/$MONTH.md)" >> docs/index.md
+          echo "- [$MONTH](jokes/$MONTH.md)" >> docs/README.md
+
+      - name: Commit Changes
+        run: |
+          git add docs/ .gitignore
+          git commit -m "Initial GitHub Pages setup with first programming joke" || echo "No changes to commit"
           git push
 
       - name: Deploy to GitHub Pages
-        if: success()
         uses: actions/deploy-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          target-branch: 'main'
-          publish-dir: './docs'
+          publish_dir: ./docs
