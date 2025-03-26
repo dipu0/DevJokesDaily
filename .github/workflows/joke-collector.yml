@@ -98,6 +98,4 @@ jobs:
         if: success()
         uses: actions/deploy-pages@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          target-branch: 'main'
-          publish-dir: './docs'
+          token: ${{ secrets.GITHUB_TOKEN }}
