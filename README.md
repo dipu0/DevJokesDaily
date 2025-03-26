@@ -1,5 +1,3 @@
-Here's a polished `README.md` for your DevJokesDaily repository:
-
 ```markdown
 # DevJokesDaily 🤖💻😂
 
