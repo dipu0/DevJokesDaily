@@ -1,0 +1,4 @@
+title: DevJokesDaily
+theme: jekyll-theme-primer
+plugins:
+  - jekyll-relative-links
