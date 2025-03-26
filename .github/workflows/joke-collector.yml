@@ -1,0 +1,84 @@
+name: Programming Joke Collector
+
+on:
+  schedule:
+    - cron: '0 8-20 * * 0-4' # Sun-Thu, 8AM-8PM UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  collect-joke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "dipu0"
+          git config --global user.email "c.dipu0@gmail.com"
+          git config --global pull.rebase true
+
+      - name: Determine if running
+        id: schedule
+        run: |
+          # Base schedule (Sun-Thu)
+          SHOULD_RUN="true"
+          DAY=$(date +%u)
+          
+          # Weekend logic (Fri/Sat)
+          if [[ $DAY -ge 5 ]]; then
+            # 30% chance to run on weekends
+            [[ $(( RANDOM % 100 )) -gt 30 ]] && SHOULD_RUN="false"
+          fi
+          
+          echo "should_run=$SHOULD_RUN" >> $GITHUB_OUTPUT
+          echo "date=$(date +'%Y-%m-%d %H:%M')" >> $GITHUB_OUTPUT
+
+      - name: Collect joke
+        if: steps.schedule.outputs.should_run == 'true'
+        run: |
+          # File management
+          MONTH=$(date +'%Y-%m')
+          mkdir -p docs/jokes
+          JOKE_FILE="docs/jokes/$MONTH.md"
+          [ -f "$JOKE_FILE" ] || echo "# Jokes Collection ($MONTH)\n" > "$JOKE_FILE"
+
+          # Fetch joke (50/50 single/two-part)
+          JOKE_TYPE=$(( RANDOM % 2 ))
+          if [[ $JOKE_TYPE -eq 0 ]]; then
+            JOKE_JSON=$(curl -s "https://v2.jokeapi.dev/joke/Programming?type=twopart")
+            SETUP=$(jq -r '.setup' <<< "$JOKE_JSON")
+            DELIVERY=$(jq -r '.delivery' <<< "$JOKE_JSON")
+            CONTENT="**Q:** $SETUP  \n**A:** $DELIVERY"
+            COMMIT_MSG="Joke #$(jq -r '.id' <<< "$JOKE_JSON"): $SETUP"
+          else
+            JOKE_JSON=$(curl -s "https://v2.jokeapi.dev/joke/Programming?type=single")
+            CONTENT=$(jq -r '.joke' <<< "$JOKE_JSON")
+            COMMIT_MSG="Joke #$(jq -r '.id' <<< "$JOKE_JSON"): ${CONTENT:0:50}"
+          fi
+
+          # Save joke
+          echo -e "\n### $(steps.schedule.outputs.date) (ID: $(jq -r '.id' <<< "$JOKE_JSON"))\n$CONTENT" >> "$JOKE_FILE"
+          
+          # Update index
+          echo "- [$MONTH](jokes/$MONTH.md)" >> docs/README.md
+          
+          # Commit
+          git add docs/
+          git commit -m "${COMMIT_MSG:0:72}"
+          git push
+
+      - name: Deploy to GitHub Pages
+        if: success()
+        uses: actions/deploy-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          target-branch: 'main'
+          publish-dir: './docs'
