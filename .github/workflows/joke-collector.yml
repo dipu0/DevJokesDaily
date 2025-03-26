@@ -1,5 +1,4 @@
 name: Programming Joke Collector
-
 on:
   schedule:
     - cron: '0 8-20 * * 0-4' # Sun-Thu, 8AM-8PM UTC
@@ -14,62 +13,101 @@ jobs:
   collect-joke:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Setup Git
+      - name: Configure Git
         run: |
           git config --global user.name "dipu0"
           git config --global user.email "c.dipu0@gmail.com"
+          git config --global pull.rebase true
 
-      - name: Initialize Docs
+      - name: Setup Pages Directory
         run: |
           mkdir -p docs
-          cat > docs/_config.yml <<EOF
-          title: DevJokesDaily
-          theme: jekyll-theme-primer
-          plugins:
-            - jekyll-relative-links
-          exclude:
-            - README.md
-          EOF
+          
+          # Create _config.yml if not exists
+          if [[ ! -f docs/_config.yml ]]; then
+            cat > docs/_config.yml << EOF
+title: DevJokesDaily
+theme: jekyll-theme-primer
+plugins:
+  - jekyll-relative-links
+EOF
+          fi
+          
+          # Create index.md if not exists
+          if [[ ! -f docs/index.md ]]; then
+            cat > docs/index.md << EOF
+---
+layout: default
+title: DevJokesDaily
+---
+# Programming Joke Archive
 
-          cat > docs/index.md <<EOF
-          ---
-          layout: default
-          ---
-          # DevJokesDaily
+Browse monthly collections:
+EOF
+          fi
           
-          Welcome to the programming joke archive!
+          # Create README.md if not exists
+          if [[ ! -f docs/README.md ]]; then
+            echo "# Jokes Index" > docs/README.md
+          fi
           
-          {% for month in site.jokes %}
-          - [{{ month.name | remove: ".md" }}]({{ month.url }})
-          {% endfor %}
-          EOF
+          # Ensure jokes directory exists
+          mkdir -p docs/jokes
+
+      - name: Determine Run Conditions
+        id: schedule
+        run: |
+          SHOULD_RUN="true"
+          DAY=$(date +%u)
+          if [[ $DAY -ge 5 ]]; then
+            [[ $(( RANDOM % 100 )) -gt 30 ]] && SHOULD_RUN="false"
+          fi
+          echo "should_run=$SHOULD_RUN" >> $GITHUB_OUTPUT
+          echo "date=$(date +'%Y-%m-%d %H:%M')" >> $GITHUB_OUTPUT
 
       - name: Collect Joke
+        if: steps.schedule.outputs.should_run == 'true'
         run: |
           MONTH=$(date +'%Y-%m')
-          mkdir -p docs/jokes
           JOKE_FILE="docs/jokes/$MONTH.md"
           
-          # Initialize file if needed
-          [ -f "$JOKE_FILE" ] || echo "# $MONTH Jokes" > "$JOKE_FILE"
-
-          # Get joke
-          JOKE=$(curl -s "https://v2.jokeapi.dev/joke/Programming?blacklistFlags=nsfw,racist&type=single,twopart")
-          if jq -e '.type == "twopart"' <<< "$JOKE"; then
-            CONTENT="**Q:** $(jq -r '.setup' <<< "$JOKE")\n**A:** $(jq -r '.delivery' <<< "$JOKE")"
-          else
-            CONTENT=$(jq -r '.joke' <<< "$JOKE")
+          # Initialize monthly file if needed
+          if [[ ! -f "$JOKE_FILE" ]]; then
+            printf "# %s Jokes\n\n" "$MONTH" > "$JOKE_FILE"
           fi
-
-          # Append joke
-          echo -e "\n### $(date +'%Y-%m-%d %H:%M')\n$CONTENT" >> "$JOKE_FILE"
+          
+          # Fetch joke
+          JOKE_JSON=$(curl -s "https://v2.jokeapi.dev/joke/Programming?blacklistFlags=nsfw,racist&type=single,twopart")
+          
+          if jq -e '.type == "twopart"' <<< "$JOKE_JSON"; then
+            CONTENT="**Q:** $(jq -r '.setup' <<< "$JOKE_JSON")\n**A:** $(jq -r '.delivery' <<< "$JOKE_JSON")"
+            MSG="Joke #$(jq -r '.id' <<< "$JOKE_JSON"): $(jq -r '.setup' <<< "$JOKE_JSON" | head -n 1)"
+          else
+            CONTENT=$(jq -r '.joke' <<< "$JOKE_JSON")
+            MSG="Joke #$(jq -r '.id' <<< "$JOKE_JSON"): ${CONTENT:0:50}"
+          fi
+          
+          # Save joke
+          echo -e "\n### $(steps.schedule.outputs.date) (ID: $(jq -r '.id' <<< "$JOKE_JSON"))\n$CONTENT" >> "$JOKE_FILE"
+          
+          # Update indexes
+          grep -qF "$MONTH" docs/index.md || echo "- [$MONTH](jokes/$MONTH.md)" >> docs/index.md
+          grep -qF "$MONTH" docs/README.md || echo "- [$MONTH](jokes/$MONTH.md)" >> docs/README.md
           
           # Commit
           git add docs/
-          git commit -m "Added new joke" || echo "No changes to commit"
+          git commit -m "${MSG:0:72}"
           git push
 
       - name: Deploy to GitHub Pages
+        if: success()
         uses: actions/deploy-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          target-branch: 'main'
+          publish-dir: './docs'
